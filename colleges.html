@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Colleges · ApplyMate</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main.wide { max-width: 860px; }
+    .filters { display: grid; grid-template-columns: 1fr 180px; gap: 12px; margin-bottom: 8px; }
+    @media (max-width: 560px) { .filters { grid-template-columns: 1fr; } }
+    #count { color: var(--muted); margin: 0 0 16px; }
+    .college { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 12px; }
+    .college h2 { font-size: 1.15rem; margin: 0; }
+    .where { color: var(--muted); margin: 2px 0 10px; }
+    .college dl { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; margin: 0; }
+    .college dt { color: var(--muted); } .college dd { margin: 0; }
+    .college details { margin-top: 10px; }
+    .college summary { cursor: pointer; font-weight: 600; }
+    .tag { display: inline-block; font-size: .8rem; border: 1px solid var(--border);
+      border-radius: 99px; padding: 1px 10px; margin-left: 8px; color: var(--muted); font-weight: 500; }
+    .nav a { color: var(--text); margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="../">ApplyMate</a>
+    <div class="nav"><a href="profile.html">Profile</a><button class="ghost" id="logout" type="button">Log out</button></div>
+  </header>
+  <main class="wide">
+    <h1>Colleges</h1>
+    <p class="lead">Search colleges in India, the US and the UK. Always confirm dates on the official site.</p>
+    <div class="filters">
+      <div><label for="q" style="margin-top:0">Search</label>
+        <input id="q" type="text" placeholder="College, city or course"></div>
+      <div><label for="country" style="margin-top:0">Country</label>
+        <select id="country"><option value="">All countries</option>
+          <option>India</option><option>US</option><option>UK</option></select></div>
+    </div>
+    <p id="count" role="status" aria-live="polite">Loading colleges...</p>
+    <div id="list"></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let all = [];
+
+    function el(tag, text, cls) {
+      const e = document.createElement(tag);
+      if (text !== undefined && text !== null) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    function row(dl, label, value) {
+      if (!value) return;
+      dl.append(el("dt", label), el("dd", value));
+    }
+    function fmtDate(d) {
+      return new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    }
+
+    function card(c) {
+      const a = el("article", null, "college");
+      const h = el("h2", c.name);
+      if (!c.verified) h.append(el("span", "Unverified", "tag"));
+      a.append(h, el("p", [c.city, c.country].filter(Boolean).join(", "), "where"));
+
+      const dl = el("dl");
+      row(dl, "Programs", c.programs);
+      row(dl, "Deadline", c.deadline ? fmtDate(c.deadline) : "No fixed date");
+      row(dl, "Note", c.deadline_note);
+      a.append(dl);
+
+      if (c.requirements) {
+        const d = el("details"); d.append(el("summary", "Requirements"), el("p", c.requirements));
+        a.append(d);
+      }
+      if (c.official_link && /^https:\/\//i.test(c.official_link)) {
+        const link = el("a", "Official website");
+        link.href = c.official_link; link.target = "_blank"; link.rel = "noopener noreferrer";
+        const p = el("p"); p.style.margin = "10px 0 0"; p.append(link); a.append(p);
+      }
+      return a;
+    }
+
+    function render() {
+      const q = $("q").value.trim().toLowerCase(), country = $("country").value;
+      const shown = all.filter((c) =>
+        (!country || c.country === country) &&
+        (!q || [c.name, c.city, c.programs].join(" ").toLowerCase().includes(q)));
+      $("list").replaceChildren(...shown.map(card));
+      $("count").textContent = shown.length
+        ? `Showing ${shown.length} of ${all.length} colleges.`
+        : "No colleges match. Try a different search or choose All countries.";
+    }
+
+    async function init() {
+      const { data } = await db.auth.getSession();
+      if (!data.session) return (location.href = "login.html");
+      const { data: rows, error } = await db.from("colleges").select("*").order("name");
+      if (error) return ($("count").textContent = "Could not load colleges: " + error.message);
+      all = rows; render();
+    }
+
+    $("q").addEventListener("input", render);
+    $("country").addEventListener("change", render);
+    $("logout").addEventListener("click", async () => { await db.auth.signOut(); location.href = "login.html"; });
+    init();
+  </script>
+</body>
+</html>
