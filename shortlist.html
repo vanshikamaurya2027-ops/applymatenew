@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard · ApplyMate</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main.wide { max-width: 860px; }
+    #summary { display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 14px 18px; margin-bottom: 18px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+    #summary strong { font-size: 1.1rem; }
+    .college { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 14px; }
+    .top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .college h2 { font-size: 1.15rem; margin: 0; }
+    .where { color: var(--muted); margin: 2px 0 8px; }
+    .due { font-weight: 700; text-align: right; } .due small { display: block; font-weight: 400; }
+    .due.soon { color: var(--error); } .due.done { color: var(--ok); }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+    .row label { margin: 0; } .row select { width: auto; }
+    .check { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 6px 0; }
+    .check.done span { text-decoration: line-through; color: var(--muted); }
+    .addrow { display: flex; gap: 8px; margin-top: 8px; } .addrow button { padding: 7px 14px; }
+    .meta { color: var(--muted); font-size: .9rem; }
+    .nav a { color: var(--text); margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="../">ApplyMate</a>
+    <div class="nav"><a href="colleges.html">Colleges</a><a href="profile.html">Profile</a>
+      <button class="ghost" id="logout" type="button">Log out</button></div>
+  </header>
+  <main class="wide">
+    <h1>Your dashboard</h1>
+    <p class="lead">Your shortlist, with the nearest deadline first.</p>
+    <div id="summary" hidden></div>
+    <p id="count" role="status" aria-live="polite">Loading your shortlist...</p>
+    <div id="list"></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const STATUSES = { considering: "Considering", applying: "Applying", submitted: "Submitted" };
+    const DEFAULT_CHECKLIST = ["Read the requirements on the official site", "Gather documents and scores",
+      "Write essays or SOP", "Arrange recommendations", "Pay the fee and submit"];
+    let items = [];
+
+    function el(tag, text, cls) {
+      const e = document.createElement(tag);
+      if (text !== undefined && text !== null) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    const today = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; };
+    const daysLeft = (d) => Math.round((new Date(d + "T00:00:00") - today()) / 86400000);
+    const fmt = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+    async function save(item, patch) {
+      const { error } = await db.from("shortlist").update(patch).eq("id", item.id);
+      if (error) { alert("Could not save: " + error.message); return false; }
+      Object.assign(item, patch); return true;
+    }
+
+    function checklistBox(item) {
+      const box = el("div");
+      function draw() {
+        const list = item.checklist, done = list.filter((x) => x.d).length;
+        const rows = list.map((x, i) => {
+          const cb = el("input"); cb.type = "checkbox"; cb.checked = x.d;
+          cb.addEventListener("change", async () => {
+            const next = list.map((y, j) => (j === i ? { t: y.t, d: cb.checked } : y));
+            if (!(await save(item, { checklist: next }))) cb.checked = !cb.checked;
+            draw();
+          });
+          const l = el("label", null, "check" + (x.d ? " done" : "")); l.append(cb, el("span", x.t));
+          return l;
+        });
+        const add = el("div", null, "addrow");
+        const inp = el("input"); inp.type = "text"; inp.placeholder = "Add your own task"; inp.setAttribute("aria-label", "Add your own task");
+        const btn = el("button", "Add", "ghost"); btn.type = "button";
+        btn.addEventListener("click", async () => {
+          const t = inp.value.trim(); if (!t) return;
+          await save(item, { checklist: [...list, { t, d: false }] }); draw();
+        });
+        add.append(inp, btn);
+        box.replaceChildren(el("p", `Checklist: ${done} of ${list.length} done`, "meta"), ...rows, add);
+      }
+      draw(); return box;
+    }
+
+    function card(item) {
+      const c = item.colleges, a = el("article", null, "college");
+      const top = el("div", null, "top"), left = el("div");
+      left.append(el("h2", c.name), el("p", [c.city, c.country].filter(Boolean).join(", "), "where"));
+      const due = el("div", null, "due");
+      if (item.status === "submitted") { due.textContent = "Submitted"; due.classList.add("done"); }
+      else if (c.deadline) {
+        const n = daysLeft(c.deadline);
+        due.textContent = n < 0 ? "Deadline passed" : n === 0 ? "Due today" : n + (n === 1 ? " day left" : " days left");
+        if (n >= 0 && n <= 14) due.classList.add("soon");
+        due.append(el("small", fmt(c.deadline)));
+      } else due.textContent = "No fixed date";
+      top.append(left, due); a.append(top);
+      if (c.deadline_note) a.append(el("p", c.deadline_note, "meta"));
+      if (!c.verified) a.append(el("p", "Sample data: confirm dates on the official site.", "meta"));
+
+      const row = el("div", null, "row");
+      const sel = el("select"); sel.id = "s-" + item.id;
+      Object.entries(STATUSES).forEach(([v, t]) => { const o = el("option", t); o.value = v; sel.append(o); });
+      sel.value = item.status;
+      const lab = el("label", "Status"); lab.htmlFor = sel.id;
+      sel.addEventListener("change", async () => {
+        if (await save(item, { status: sel.value })) render(); else sel.value = item.status;
+      });
+      row.append(lab, sel);
+      if (c.official_link && /^https:\/\//i.test(c.official_link)) {
+        const link = el("a", "Official website"); link.href = c.official_link;
+        link.target = "_blank"; link.rel = "noopener noreferrer"; row.append(link);
+      }
+      const rm = el("button", "Remove", "ghost"); rm.type = "button";
+      rm.addEventListener("click", async () => {
+        if (!confirm("Remove " + c.name + " from your shortlist?")) return;
+        const { error } = await db.from("shortlist").delete().eq("id", item.id);
+        if (error) return alert("Could not remove: " + error.message);
+        items = items.filter((i) => i.id !== item.id); render();
+      });
+      row.append(rm); a.append(row);
+
+      a.append(checklistBox(item));
+
+      const nl = el("label", "Notes"); nl.htmlFor = "n-" + item.id;
+      const notes = el("textarea"); notes.id = "n-" + item.id; notes.rows = 2; notes.value = item.notes || "";
+      notes.placeholder = "Anything to remember, like essay topics or contacts";
+      notes.addEventListener("change", () => save(item, { notes: notes.value }));
+      a.append(nl, notes);
+      return a;
+    }
+
+    function summary() {
+      const s = $("summary"); s.hidden = !items.length; if (!items.length) return;
+      const n = (st) => items.filter((i) => i.status === st).length;
+      const upcoming = items.filter((i) => i.status !== "submitted" && i.colleges.deadline && daysLeft(i.colleges.deadline) >= 0)
+        .sort((x, y) => x.colleges.deadline.localeCompare(y.colleges.deadline))[0];
+      const part = (num, label) => { const d = el("div"); d.append(el("strong", String(num)), " " + label); return d; };
+      s.replaceChildren(part(n("considering"), "considering"), part(n("applying"), "applying"), part(n("submitted"), "submitted"),
+        el("div", upcoming ? `Next deadline: ${upcoming.colleges.name}, ${fmt(upcoming.colleges.deadline)}` : "No upcoming deadlines"));
+    }
+
+    function render() {
+      items.sort((x, y) => {
+        const sx = x.status === "submitted" ? 1 : 0, sy = y.status === "submitted" ? 1 : 0;
+        if (sx !== sy) return sx - sy;
+        return (x.colleges.deadline || "9999-12-31").localeCompare(y.colleges.deadline || "9999-12-31");
+      });
+      $("list").replaceChildren(...items.map(card)); summary();
+      if (items.length) { $("count").textContent = ""; return; }
+      const p = el("p", "Your shortlist is empty. "), a = el("a", "Browse colleges"); a.href = "colleges.html";
+      p.append(a, " and choose Add to shortlist."); $("count").replaceChildren(p);
+    }
+
+    async function init() {
+      const { data } = await db.auth.getSession();
+      if (!data.session) return (location.href = "login.html");
+      const { data: rows, error } = await db.from("shortlist").select("id, status, notes, checklist, colleges(*)");
+      if (error) return ($("count").textContent = "Could not load your shortlist: " + error.message);
+      items = rows.filter((r) => r.colleges).map((r) => ({ ...r,
+        checklist: Array.isArray(r.checklist) ? r.checklist : DEFAULT_CHECKLIST.map((t) => ({ t, d: false })) }));
+      render();
+    }
+    $("logout").addEventListener("click", async () => { await db.auth.signOut(); location.href = "login.html"; });
+    init();
+  </script>
+</body>
+</html>
