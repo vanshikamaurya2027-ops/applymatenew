@@ -8,7 +8,7 @@
 <body>
   <header>
     <a class="brand" href="../">ApplyMate</a>
-    <button class="ghost" id="logout" type="button">Log out</button>
+    <div><a href="colleges.html" style="color:var(--text);margin-right:16px">Colleges</a><a href="shortlist.html" style="color:var(--text);margin-right:16px">Shortlist</a><button class="ghost" id="logout" type="button">Log out</button></div>
   </header>
   <main>
     <h1>Your profile</h1>
@@ -82,7 +82,9 @@
         updated_at: new Date().toISOString(),
       });
       $("save").disabled = false;
-      error ? msg("Could not save: " + error.message, "error") : msg("Profile saved.", "ok");
+      if (error) return msg("Could not save: " + error.message, "error");
+      msg("Profile saved. Taking you to colleges...", "ok");
+      setTimeout(() => { location.href = "colleges.html"; }, 1200);
     });
 
     $("logout").addEventListener("click", async () => {
