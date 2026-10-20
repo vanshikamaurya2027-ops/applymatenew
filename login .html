@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · ApplyMate</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><a class="brand" href="../">ApplyMate</a></header>
+  <main>
+    <h1 id="title">Log in to ApplyMate</h1>
+    <p class="lead" id="lead">Pick up where you left off.</p>
+    <div class="card">
+      <form id="form" novalidate>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" required>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" minlength="6" required>
+        <small id="hint" hidden>At least 6 characters.</small>
+        <button class="primary" id="submit" type="submit">Log in</button>
+        <div id="msg" role="status" aria-live="polite"></div>
+      </form>
+      <p class="switch"><span id="switch-text">New here?</span>
+        <button class="link" id="switch" type="button">Create an account</button></p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script>
+    let mode = "login"; // or "signup"
+    const $ = (id) => document.getElementById(id);
+    const msg = (text, type) => { $("msg").textContent = text; $("msg").className = type || ""; };
+    const goToProfile = () => { location.href = "profile.html"; };
+    const goToColleges = () => { location.href = "colleges.html"; };
+
+    db.auth.getSession().then(({ data }) => { if (data.session) goToColleges(); });
+
+    $("switch").addEventListener("click", () => {
+      mode = mode === "login" ? "signup" : "login";
+      const s = mode === "signup";
+      $("title").textContent = s ? "Create your ApplyMate account" : "Log in to ApplyMate";
+      $("lead").textContent = s ? "Free to start. It takes a minute." : "Pick up where you left off.";
+      $("submit").textContent = s ? "Create account" : "Log in";
+      $("switch-text").textContent = s ? "Already have an account?" : "New here?";
+      $("switch").textContent = s ? "Log in" : "Create an account";
+      $("password").autocomplete = s ? "new-password" : "current-password";
+      $("hint").hidden = !s;
+      msg("");
+    });
+
+    $("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = $("email").value.trim(), password = $("password").value;
+      if (!email || password.length < 6) return msg("Enter your email and a password of at least 6 characters.", "error");
+      $("submit").disabled = true; msg("");
+      try {
+        if (mode === "signup") {
+          const { data, error } = await db.auth.signUp({ email, password,
+            options: { emailRedirectTo: new URL("profile.html", location.href).href } });
+          if (error) throw error;
+          if (data.session) return goToProfile();
+          msg("Account created. Check your email and click the confirmation link.", "ok");
+        } else {
+          const { error } = await db.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          goToColleges();
+        }
+      } catch (err) {
+        msg(err.message || "Something went wrong. Try again.", "error");
+      } finally { $("submit").disabled = false; }
+    });
+  </script>
+</body>
+</html>
