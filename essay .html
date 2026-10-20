@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Essay feedback · ApplyMate</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main.wide { max-width: 860px; }
+    .notice { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px;
+      background: var(--surface); padding: 12px 16px; margin: 0 0 20px; font-size: .95rem; }
+    textarea#essay { min-height: 280px; resize: vertical; }
+    .meta { color: var(--muted); font-size: .9rem; }
+    .fb { margin-top: 24px; } .fb section { background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px 20px; margin-bottom: 12px; }
+    .fb h3 { margin: 0 0 6px; font-size: 1.05rem; } .fb p { margin: 0; white-space: pre-wrap; }
+    .fb ol { margin: 0; padding-left: 20px; }
+    h2.sec { font-size: 1.25rem; margin: 40px 0 12px; }
+    .past { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 18px; margin-bottom: 10px; }
+    .past > summary { cursor: pointer; font-weight: 600; }
+    .past details summary { cursor: pointer; color: var(--muted); margin-top: 10px; }
+    .past details p { white-space: pre-wrap; }
+    .nav a { color: var(--text); margin-right: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="../">ApplyMate</a>
+    <div class="nav"><a href="colleges.html">Colleges</a><a href="shortlist.html">Shortlist</a><a href="profile.html">Profile</a>
+      <button class="ghost" id="logout" type="button">Log out</button></div>
+  </header>
+  <main class="wide">
+    <h1>Essay feedback</h1>
+    <p class="lead">Paste your draft, pick a college, and get feedback on structure, clarity and fit.</p>
+    <div class="notice">
+      <strong>AI-generated feedback.</strong> It can be wrong or miss things, and it is not an admissions decision.
+      Always check requirements, word limits and deadlines on the college's official website.
+      Your essay is sent to an AI service to produce the feedback and saved to your account.
+    </div>
+
+    <div class="card">
+      <form id="form" novalidate>
+        <label for="college" style="margin-top:0">College</label>
+        <select id="college" required><option value="">Loading colleges...</option></select>
+        <p class="meta" id="official" hidden></p>
+
+        <label for="prompt">Essay prompt <small>(optional)</small></label>
+        <input id="prompt" type="text" maxlength="500" placeholder="Paste the question you are answering">
+
+        <label for="essay">Your essay</label>
+        <textarea id="essay" placeholder="Paste your draft here"></textarea>
+        <p class="meta" id="words">0 words (50 to 1500)</p>
+
+        <button class="primary" id="go" type="submit">Get feedback</button>
+        <div id="msg" role="status" aria-live="polite"></div>
+      </form>
+    </div>
+    <div id="result" class="fb"></div>
+
+    <h2 class="sec">Your past feedback</h2>
+    <div id="history"><p class="meta">Loading...</p></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const msg = (t, type) => { $("msg").textContent = t; $("msg").className = type || ""; };
+    // The name of your Edge Function in Supabase (Edge Functions page). Change it here if yours differs.
+    const FUNCTION_NAME = "super-action";
+    let colleges = [];
+
+    function el(tag, text, cls) {
+      const e = document.createElement(tag);
+      if (text !== undefined && text !== null) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    const countWords = (s) => (s.trim() ? s.trim().split(/\s+/).length : 0);
+
+    function feedbackNode(fb, collegeName) {
+      const wrap = el("div");
+      [["Structure", fb.structure], ["Clarity", fb.clarity], ["Fit" + (collegeName ? " for " + collegeName : ""), fb.fit]]
+        .forEach(([t, body]) => { if (body) { const s = el("section"); s.append(el("h3", t), el("p", body)); wrap.append(s); } });
+      if (fb.next_steps && fb.next_steps.length) {
+        const s = el("section"), ol = el("ol");
+        fb.next_steps.forEach((x) => ol.append(el("li", x)));
+        s.append(el("h3", "Next steps for your next draft"), ol); wrap.append(s);
+      }
+      wrap.append(el("p", "AI-generated feedback. Check requirements on the official college site.", "meta"));
+      return wrap;
+    }
+
+    async function loadHistory() {
+      const { data, error } = await db.from("essays")
+        .select("id, created_at, prompt, essay_text, feedback, colleges(name)").order("created_at", { ascending: false }).limit(20);
+      if (error) return $("history").replaceChildren(el("p", "Could not load past feedback: " + error.message, "meta"));
+      if (!data.length) return $("history").replaceChildren(el("p", "Nothing yet. Your feedback will appear here.", "meta"));
+      $("history").replaceChildren(...data.map((r) => {
+        const d = el("details", null, "past");
+        const name = r.colleges ? r.colleges.name : "College removed";
+        d.append(el("summary", name + " · " + new Date(r.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })));
+        if (r.feedback) d.append(feedbackNode(r.feedback, null));
+        const e = el("details"); e.append(el("summary", "Show the essay I submitted"), el("p", r.essay_text)); d.append(e);
+        return d;
+      }));
+    }
+
+    async function init() {
+      const { data } = await db.auth.getSession();
+      if (!data.session) return (location.href = "login.html");
+      const { data: rows, error } = await db.from("colleges").select("id, name, country, official_link").order("name");
+      if (error) { msg("Could not load colleges: " + error.message, "error"); return; }
+      colleges = rows;
+      $("college").replaceChildren(Object.assign(el("option", "Choose a college"), { value: "" }),
+        ...rows.map((c) => Object.assign(el("option", c.name + " (" + c.country + ")"), { value: c.id })));
+      loadHistory();
+    }
+
+    $("college").addEventListener("change", () => {
+      const c = colleges.find((x) => x.id === $("college").value), p = $("official");
+      p.hidden = !(c && c.official_link && /^https:\/\//i.test(c.official_link));
+      if (!p.hidden) {
+        const a = el("a", "official admissions site"); a.href = c.official_link; a.target = "_blank"; a.rel = "noopener noreferrer";
+        p.replaceChildren("Check requirements on the ", a, ".");
+      }
+    });
+    $("essay").addEventListener("input", () => { $("words").textContent = countWords($("essay").value) + " words (50 to 1500)"; });
+
+    $("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const college_id = $("college").value, essay = $("essay").value, n = countWords(essay);
+      if (!college_id) return msg("Choose a college.", "error");
+      if (n < 50) return msg("Paste at least 50 words.", "error");
+      if (n > 1500) return msg("Please keep the essay under 1500 words.", "error");
+      $("go").disabled = true; $("result").replaceChildren();
+      msg("Reviewing your essay. This usually takes 15 to 30 seconds...");
+      const { data, error } = await db.functions.invoke(FUNCTION_NAME, { body: { college_id, prompt: $("prompt").value.trim(), essay } });
+      $("go").disabled = false;
+      if (error) {
+        const st = error.context && error.context.status ? error.context.status : "no response";
+        let m = "Could not get feedback (" + (error.name || "error") + ", " + st + "). Please try again.";
+        try { const j = await error.context.json(); const d = j && (j.error || j.message); if (d) m = d + " (" + st + ")"; } catch (_) {}
+        return msg(m, "error");
+      }
+      const c = colleges.find((x) => x.id === college_id);
+      msg(data.saved ? "Done. This feedback is saved below under past feedback." : "Done, but it could not be saved.", "ok");
+      $("result").replaceChildren(el("h2", "Your feedback", "sec"), feedbackNode(data.feedback, c ? c.name : null));
+      if (data.saved) loadHistory();
+    });
+
+    $("logout").addEventListener("click", async () => { await db.auth.signOut(); location.href = "login.html"; });
+    init();
+  </script>
+</body>
+</html>
