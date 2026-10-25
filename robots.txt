@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /profile.html
+Disallow: /colleges.html
+Disallow: /shortlist.html
+Disallow: /essay.html
+
+Sitemap: https://apply-mate.app/sitemap.xml
