@@ -38,6 +38,8 @@
   <script src="config.js"></script>
   <script>
     const CHECKOUT_FUNCTION = "reate-checkout-ts";   // must match the function name in Supabase
+    // Public key, safe in the browser. Supabase > Project Settings > API Keys > "Publishable key" (starts with sb_publishable_)
+    const PUBLISHABLE_KEY = "PASTE_YOUR_sb_publishable_KEY_HERE";
     const $ = (id) => document.getElementById(id);
     const msg = (t, c) => { $("msg").textContent = t; $("msg").className = c || ""; };
 
@@ -74,12 +76,19 @@
 
     $("buy").addEventListener("click", async () => {
       $("buy").disabled = true; msg("Opening the payment page...");
-      const { data, error } = await db.functions.invoke(CHECKOUT_FUNCTION, { body: {} });
-      if (error || !data || !data.checkout_url) {
-        let m = "Could not start the payment. Please try again.";
-        try { const j = await error.context.json(); if (j && j.error) m = j.error; } catch (_) {}
-        $("buy").disabled = false; return msg(m, "error");
-      }
+      let data = null, m = "Could not start the payment. Please try again.";
+      try {
+        const { data: { session } } = await db.auth.getSession();
+        if (!session) { location.href = "login.html"; return; }
+        const r = await fetch(SUPABASE_URL + "/functions/v1/" + CHECKOUT_FUNCTION, {
+          method: "POST",
+          headers: { "apikey": PUBLISHABLE_KEY, "Authorization": "Bearer " + session.access_token, "Content-Type": "application/json" },
+          body: "{}"
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.checkout_url) data = j; else m = (j.error || j.message || m) + " (" + r.status + ")";
+      } catch (_) {}
+      if (!data) { $("buy").disabled = false; return msg(m, "error"); }
       if (!/^https:\/\//i.test(data.checkout_url)) { $("buy").disabled = false; return msg("Unexpected payment link. Please try again.", "error"); }
       location.href = data.checkout_url;
     });
