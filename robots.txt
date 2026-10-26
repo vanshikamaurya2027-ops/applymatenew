@@ -4,5 +4,6 @@ Disallow: /profile.html
 Disallow: /colleges.html
 Disallow: /shortlist.html
 Disallow: /essay.html
+Disallow: /upgrade.html
 
 Sitemap: https://apply-mate.app/sitemap.xml

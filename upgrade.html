@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Season Plan · ApplyMate</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .nav a { color: var(--text); margin-right: 16px; }
+    .price { font-size: 2rem; font-weight: 700; margin: 4px 0 0; }
+    ul.feat { padding-left: 20px; margin: 16px 0; } ul.feat li { margin: 6px 0; }
+    #msg { margin-top: 14px; min-height: 1.4em; } #msg.error { color: var(--error); } #msg.ok { color: var(--ok); }
+    .fine { color: var(--muted); font-size: .9rem; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="../">ApplyMate</a>
+    <div class="nav"><a href="colleges.html">Colleges</a><a href="shortlist.html">Shortlist</a><a href="essay.html">Essays</a><a href="profile.html">Profile</a>
+      <button class="ghost" id="logout" type="button">Log out</button></div>
+  </header>
+  <main>
+    <h1>Season Plan</h1>
+    <p class="lead">Keep getting essay feedback through your application season.</p>
+    <div class="card">
+      <p class="price">Rs 499 <small>one-time</small></p>
+      <ul class="feat">
+        <li>Up to 10 AI essay feedback runs a day</li>
+        <li>Everything in the free plan: college list, shortlist and deadline tracker</li>
+      </ul>
+      <p id="status" class="meta">Checking your plan...</p>
+      <button class="primary" id="buy" type="button" disabled>Pay Rs 499</button>
+      <div id="msg" role="status" aria-live="polite"></div>
+      <p class="fine">Free plan: 2 essay feedback runs in total. Payment is handled by Dodo Payments.
+        See our <a href="refund.html">refund policy</a>. AI feedback is not an admissions decision.</p>
+    </div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script>
+    const CHECKOUT_FUNCTION = "create-checkout";   // must match the function name in Supabase
+    const $ = (id) => document.getElementById(id);
+    const msg = (t, c) => { $("msg").textContent = t; $("msg").className = c || ""; };
+
+    async function getPlan(uid) {
+      const { data } = await db.from("entitlements").select("paid,free_runs_used").eq("user_id", uid).maybeSingle();
+      return data || { paid: false, free_runs_used: 0 };
+    }
+
+    async function init() {
+      const { data: { session } } = await db.auth.getSession();
+      if (!session) { location.href = "login.html"; return; }
+      const uid = session.user.id;
+      const justPaid = new URLSearchParams(location.search).get("paid") === "1";
+      let plan = await getPlan(uid);
+
+      if (justPaid && !plan.paid) {
+        // The payment confirmation can take a few seconds to arrive. Check for up to ~30 seconds.
+        $("status").textContent = "Confirming your payment...";
+        for (let i = 0; i < 10 && !plan.paid; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          plan = await getPlan(uid);
+        }
+      }
+      if (plan.paid) {
+        $("status").textContent = "You are on the Season Plan. Thank you!";
+        $("buy").hidden = true;
+        msg(justPaid ? "Payment confirmed. You can now use up to 10 feedback runs a day." : "", "ok");
+        return;
+      }
+      if (justPaid) msg("We have not received the payment confirmation yet. Refresh this page in a minute. If it still shows the free plan, email vanshikam1608@gmail.com.", "error");
+      $("status").textContent = "You are on the free plan: " + Math.max(0, 2 - plan.free_runs_used) + " of 2 free feedback runs left.";
+      $("buy").disabled = false;
+    }
+
+    $("buy").addEventListener("click", async () => {
+      $("buy").disabled = true; msg("Opening the payment page...");
+      const { data, error } = await db.functions.invoke(CHECKOUT_FUNCTION, { body: {} });
+      if (error || !data || !data.checkout_url) {
+        let m = "Could not start the payment. Please try again.";
+        try { const j = await error.context.json(); if (j && j.error) m = j.error; } catch (_) {}
+        $("buy").disabled = false; return msg(m, "error");
+      }
+      if (!/^https:\/\//i.test(data.checkout_url)) { $("buy").disabled = false; return msg("Unexpected payment link. Please try again.", "error"); }
+      location.href = data.checkout_url;
+    });
+
+    $("logout").addEventListener("click", async () => { await db.auth.signOut(); location.href = "login.html"; });
+    init();
+  </script>
+</body>
+</html>
